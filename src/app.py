@@ -2,6 +2,15 @@ import streamlit as st
 import pandas as pd
 import os
 import io
+import sys
+
+# --------------------------------------------------
+# FIX MODULE PATH (important for Streamlit Cloud)
+# --------------------------------------------------
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+
 from model.predict import predict_adr
 from sklearn.preprocessing import LabelEncoder
 
@@ -10,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -87,8 +97,6 @@ st.markdown(
 # LOAD DATA
 # --------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 data = pd.read_csv(
     os.path.join(BASE_DIR, "data", "drug_adr_encoded.csv")
 )
@@ -97,12 +105,13 @@ drug_encoder = LabelEncoder()
 drug_encoder.fit(data["drug_name"])
 
 # --------------------------------------------------
-# PDF REPORT
+# PDF REPORT GENERATOR
 # --------------------------------------------------
 
 def generate_pdf_report(patient_data, medications, risk_percent, level, recommendation):
 
     buffer = io.BytesIO()
+
     doc = SimpleDocTemplate(buffer, pagesize=letter)
 
     elements = []
@@ -141,9 +150,11 @@ def generate_pdf_report(patient_data, medications, risk_percent, level, recommen
     elements.append(Paragraph(f"Recommendation: {recommendation}", styles["Normal"]))
 
     doc.build(elements)
+
     buffer.seek(0)
 
     return buffer
+
 
 # --------------------------------------------------
 # PATIENT INPUT
@@ -154,10 +165,22 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("👤 Basic Information")
 
 age = st.slider("Age", 1, 100, 50)
-gender = st.radio("Gender", ["Male", "Female"], horizontal=True)
-bp = st.slider("Blood Pressure (mmHg)", 80, 200, 120)
+
+gender = st.radio(
+    "Gender",
+    ["Male", "Female"],
+    horizontal=True
+)
+
+bp = st.slider(
+    "Blood Pressure (mmHg)",
+    80,
+    200,
+    120
+)
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
 # --------------------------------------------------
 # HEALTH BACKGROUND
@@ -168,14 +191,23 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("🩺 Health Background")
 
 diabetes = st.radio("Diabetes", ["No", "Yes"], horizontal=True) == "Yes"
-smoking_status = st.radio("Smoking Status", ["Never", "Former", "Current"], horizontal=True)
+
+smoking_status = st.radio(
+    "Smoking Status",
+    ["Never", "Former", "Current"],
+    horizontal=True
+)
+
 smoking = smoking_status in ["Former", "Current"]
 
 liver_disease = st.radio("Liver Disease", ["No", "Yes"], horizontal=True) == "Yes"
+
 gene_risk = st.radio("Genetic Risk Factors", ["No", "Yes"], horizontal=True) == "Yes"
+
 family_history = st.radio("Family History of Drug Reaction", ["No", "Yes"], horizontal=True) == "Yes"
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
 # --------------------------------------------------
 # MEDICATIONS
@@ -193,12 +225,18 @@ selected_drugs = st.multiselect(
 drug_doses = {}
 
 for drug in selected_drugs:
-    dose = st.number_input(f"{drug} Dose (mg)", min_value=1, max_value=2000, value=100)
+    dose = st.number_input(
+        f"{drug} Dose (mg)",
+        min_value=1,
+        max_value=2000,
+        value=100
+    )
     drug_doses[drug] = dose
 
 st.markdown("</div>", unsafe_allow_html=True)
 
 predict = st.button("🚀 Predict ADR Risk")
+
 
 # --------------------------------------------------
 # PREDICTION
@@ -210,7 +248,6 @@ if predict:
         st.warning("⚠ Please select at least one medication.")
         st.stop()
 
-    # Convert drugs to IDs
     drug_ids = []
 
     for drug in selected_drugs:
@@ -228,7 +265,6 @@ if predict:
         0,0,0
     ]]
 
-    # Run model
     result = predict_adr(drug_ids, lab_features)
 
     risk_percent = round(result * 100, 2)
@@ -255,6 +291,7 @@ if predict:
         <h2>{recommendation}</h2>
     </div>
     """, unsafe_allow_html=True)
+
 
     # --------------------------------------------------
     # EXPLANATION
@@ -290,6 +327,7 @@ if predict:
             st.write("•", r)
     else:
         st.write("No major clinical risk factors detected.")
+
 
     # --------------------------------------------------
     # PDF REPORT
