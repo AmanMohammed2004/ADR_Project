@@ -1,15 +1,15 @@
 import streamlit as st
-import requests
 import pandas as pd
 import os
 import io
+from model.predict import predict_adr
 from sklearn.preprocessing import LabelEncoder
+
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -49,15 +49,6 @@ st.markdown("""
     margin-bottom: 35px;
 }
 
-.stButton>button {
-    background-color: #ec4899;
-    color: white;
-    font-size: 22px;
-    padding: 12px 50px;
-    border-radius: 40px;
-    border: none;
-}
-
 .result-card {
     text-align: center;
     padding: 40px;
@@ -80,10 +71,6 @@ div.stDownloadButton > button {
     font-weight: 600;
 }
 
-div.stDownloadButton > button:hover {
-    background-color: #db2777;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,7 +84,7 @@ st.markdown(
 )
 
 # --------------------------------------------------
-# LOAD DRUG DATA
+# LOAD DATA
 # --------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -109,9 +96,8 @@ data = pd.read_csv(
 drug_encoder = LabelEncoder()
 drug_encoder.fit(data["drug_name"])
 
-
 # --------------------------------------------------
-# PDF GENERATOR
+# PDF REPORT
 # --------------------------------------------------
 
 def generate_pdf_report(patient_data, medications, risk_percent, level, recommendation):
@@ -159,7 +145,6 @@ def generate_pdf_report(patient_data, medications, risk_percent, level, recommen
 
     return buffer
 
-
 # --------------------------------------------------
 # PATIENT INPUT
 # --------------------------------------------------
@@ -169,13 +154,10 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("👤 Basic Information")
 
 age = st.slider("Age", 1, 100, 50)
-
 gender = st.radio("Gender", ["Male", "Female"], horizontal=True)
-
 bp = st.slider("Blood Pressure (mmHg)", 80, 200, 120)
 
 st.markdown("</div>", unsafe_allow_html=True)
-
 
 # --------------------------------------------------
 # HEALTH BACKGROUND
@@ -186,19 +168,14 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("🩺 Health Background")
 
 diabetes = st.radio("Diabetes", ["No", "Yes"], horizontal=True) == "Yes"
-
 smoking_status = st.radio("Smoking Status", ["Never", "Former", "Current"], horizontal=True)
-
 smoking = smoking_status in ["Former", "Current"]
 
 liver_disease = st.radio("Liver Disease", ["No", "Yes"], horizontal=True) == "Yes"
-
 gene_risk = st.radio("Genetic Risk Factors", ["No", "Yes"], horizontal=True) == "Yes"
-
 family_history = st.radio("Family History of Drug Reaction", ["No", "Yes"], horizontal=True) == "Yes"
 
 st.markdown("</div>", unsafe_allow_html=True)
-
 
 # --------------------------------------------------
 # MEDICATIONS
@@ -208,7 +185,10 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 
 st.subheader("💊 Current Medications")
 
-selected_drugs = st.multiselect("Select Medications", sorted(drug_encoder.classes_))
+selected_drugs = st.multiselect(
+    "Select Medications",
+    sorted(drug_encoder.classes_)
+)
 
 drug_doses = {}
 
@@ -220,7 +200,6 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 predict = st.button("🚀 Predict ADR Risk")
 
-
 # --------------------------------------------------
 # PREDICTION
 # --------------------------------------------------
@@ -231,117 +210,118 @@ if predict:
         st.warning("⚠ Please select at least one medication.")
         st.stop()
 
-    payload = {
-        "age": age,
-        "bp": bp,
-        "diabetes": diabetes,
-        "smoking": smoking,
-        "liver_disease": liver_disease,
-        "gene_risk": gene_risk,
-        "family_history": family_history,
-        "drugs": [
-            {"name": drug, "dose": dose}
-            for drug, dose in drug_doses.items()
-        ]
+    # Convert drugs to IDs
+    drug_ids = []
+
+    for drug in selected_drugs:
+        drug_id = drug_encoder.transform([drug])[0]
+        drug_ids.append(drug_id)
+
+    lab_features = [[
+        age,
+        bp,
+        int(diabetes),
+        int(smoking),
+        int(liver_disease),
+        int(gene_risk),
+        int(family_history),
+        0,0,0
+    ]]
+
+    # Run model
+    result = predict_adr(drug_ids, lab_features)
+
+    risk_percent = round(result * 100, 2)
+
+    if risk_percent < 40:
+        level = "Low Risk"
+        recommendation = "Safe to Take"
+        color = "#16a34a"
+
+    elif risk_percent < 70:
+        level = "Moderate Risk"
+        recommendation = "Use With Caution"
+        color = "#f59e0b"
+
+    else:
+        level = "High Risk"
+        recommendation = "Avoid This Medication"
+        color = "#dc2626"
+
+    st.markdown(f"""
+    <div class="card result-card">
+        <h1 style="font-size:70px; color:{color};">{risk_percent}%</h1>
+        <h3>{level}</h3>
+        <h2>{recommendation}</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # --------------------------------------------------
+    # EXPLANATION
+    # --------------------------------------------------
+
+    st.subheader("🔎 Why this risk level?")
+
+    reasons = []
+
+    if age > 60:
+        reasons.append("Age above 60 increases ADR susceptibility.")
+
+    if bp > 140:
+        reasons.append("High blood pressure increases drug reaction risk.")
+
+    if diabetes:
+        reasons.append("Diabetes affects drug metabolism.")
+
+    if smoking:
+        reasons.append("Smoking influences drug clearance.")
+
+    if liver_disease:
+        reasons.append("Liver disease changes drug metabolism.")
+
+    if gene_risk:
+        reasons.append("Genetic risk factors detected.")
+
+    if family_history:
+        reasons.append("Family history suggests predisposition.")
+
+    if reasons:
+        for r in reasons:
+            st.write("•", r)
+    else:
+        st.write("No major clinical risk factors detected.")
+
+    # --------------------------------------------------
+    # PDF REPORT
+    # --------------------------------------------------
+
+    patient_info = {
+        "Age": age,
+        "Gender": gender,
+        "Blood Pressure": f"{bp} mmHg",
+        "Diabetes": diabetes,
+        "Smoking": smoking_status,
+        "Liver Disease": liver_disease,
+        "Genetic Risk": gene_risk,
+        "Family History": family_history
     }
 
-    try:
+    medications = [
+        f"{drug} - {dose} mg"
+        for drug, dose in drug_doses.items()
+    ]
 
-        response = requests.post(
-            "http://localhost:8000/predict",
-            json=payload
-        )
+    pdf_buffer = generate_pdf_report(
+        patient_info,
+        medications,
+        risk_percent,
+        level,
+        recommendation
+    )
 
-        if response.status_code == 200:
-
-            result = response.json()
-
-            risk_percent = result["risk_percent"]
-            level = result["risk_level"]
-            recommendation = result["recommendation"]
-
-            color = "#16a34a" if level == "Low Risk" else "#f59e0b" if level == "Moderate Risk" else "#dc2626"
-
-            st.markdown(f"""
-            <div class="card result-card">
-                <h1 style="font-size:70px; color:{color};">{risk_percent}%</h1>
-                <h3>{level}</h3>
-                <h2>{recommendation}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # ----------------------------
-            # EXPLANATION
-            # ----------------------------
-
-            st.subheader("🔎 Why this risk level?")
-
-            reasons = []
-
-            if age > 60:
-                reasons.append("Age above 60 increases ADR susceptibility.")
-
-            if bp > 140:
-                reasons.append("High blood pressure increases drug reaction risk.")
-
-            if diabetes:
-                reasons.append("Diabetes affects drug metabolism.")
-
-            if smoking:
-                reasons.append("Smoking influences drug clearance.")
-
-            if liver_disease:
-                reasons.append("Liver disease changes drug metabolism.")
-
-            if gene_risk:
-                reasons.append("Genetic risk factors detected.")
-
-            if family_history:
-                reasons.append("Family history suggests predisposition.")
-
-            if reasons:
-                for r in reasons:
-                    st.write("•", r)
-            else:
-                st.write("No major clinical risk factors detected.")
-
-            # ----------------------------
-            # PDF REPORT
-            # ----------------------------
-
-            patient_info = {
-                "Age": age,
-                "Gender": gender,
-                "Blood Pressure": f"{bp} mmHg",
-                "Diabetes": diabetes,
-                "Smoking": smoking_status,
-                "Liver Disease": liver_disease,
-                "Genetic Risk": gene_risk,
-                "Family History": family_history
-            }
-
-            medications = [
-                f"{drug} - {dose} mg"
-                for drug, dose in drug_doses.items()
-            ]
-
-            pdf_buffer = generate_pdf_report(
-                patient_info,
-                medications,
-                risk_percent,
-                level,
-                recommendation
-            )
-
-            st.download_button(
-                label="📄 Download Clinical Report",
-                data=pdf_buffer,
-                file_name="ADR_Clinical_Report.pdf",
-                mime="application/pdf"
-            )
-
-        else:
-            st.error("Backend error. Check FastAPI server.")
-
-    except Exception as e:
-        st.error(f"Connection error: {e}")
+    st.download_button(
+        label="📄 Download Clinical Report",
+        data=pdf_buffer,
+        file_name="ADR_Clinical_Report.pdf",
+        mime="application/pdf"
+    )

@@ -1,8 +1,7 @@
 streamlit
-fastapi
-uvicorn
-torch
 pandas
 scikit-learn
+torch
+torch-geometric
 reportlab
 requests
